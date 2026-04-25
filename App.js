@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   SafeAreaView,
   View,
@@ -9,398 +9,195 @@ import {
   StyleSheet,
   Alert,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_BASE_URL = 'http://192.168.1.3:4456';
-const AUTH_USER_KEY = 'auth_user';
+const MOCK_USER = {
+  login: 'patient1',
+  password: '12345',
+  fullName: 'Иванов Иван Иванович',
+};
+
+const MOCK_MEDICAL_CASES = [
+  {
+    id: 1,
+    caseNumber: 'MC-2026-001',
+    diagnosis: 'ОРВИ',
+    startDate: '10.04.2026',
+    status: 'Активен',
+    treatment: {
+      id: 101,
+      name: 'Амбулаторное лечение ОРВИ',
+      description: 'Постельный режим, обильное питье, симптоматическая терапия.',
+      startDate: '10.04.2026',
+      endDate: '17.04.2026',
+      isActive: true,
+    },
+    diaryEntries: [
+      {
+        id: 1001,
+        entryDate: '11.04.2026',
+        bodyTemperature: '37.5',
+        bloodPressure: '120/80',
+        pulse: '82',
+        wellBeingLevel: '3',
+        painLevel: '2',
+        symptomsText: 'Слабость, насморк',
+        complaintText: 'Общее недомогание',
+        commentText: 'К вечеру состояние стабильное',
+      },
+    ],
+  },
+  {
+    id: 2,
+    caseNumber: 'MC-2026-002',
+    diagnosis: 'Артериальная гипертензия',
+    startDate: '20.03.2026',
+    status: 'Наблюдение',
+    treatment: {
+      id: 102,
+      name: 'Контроль давления',
+      description: 'Ежедневный контроль АД, прием назначенных препаратов.',
+      startDate: '20.03.2026',
+      endDate: '20.06.2026',
+      isActive: true,
+    },
+    diaryEntries: [],
+  },
+];
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [isLoginLoading, setIsLoginLoading] = useState(false);
-  const [isCasesLoading, setIsCasesLoading] = useState(false);
-  const [isTreatmentsLoading, setIsTreatmentsLoading] = useState(false);
-  const [isDiaryLoading, setIsDiaryLoading] = useState(false);
-  const [isDiarySubmitting, setIsDiarySubmitting] = useState(false);
-
-  const [login, setLogin] = useState('');
-  const [password, setPassword] = useState('');
-  const [authUser, setAuthUser] = useState(null);
-
+  const [login, setLogin] = useState('patient1');
+  const [password, setPassword] = useState('12345');
   const [screen, setScreen] = useState('cases');
-  const [medicalCases, setMedicalCases] = useState([]);
-  const [selectedCase, setSelectedCase] = useState(null);
-  const [treatments, setTreatments] = useState([]);
-  const [selectedTreatment, setSelectedTreatment] = useState(null);
-  const [diaryEntries, setDiaryEntries] = useState([]);
+  const [medicalCases, setMedicalCases] = useState(MOCK_MEDICAL_CASES);
+  const [selectedCaseId, setSelectedCaseId] = useState(null);
+  const [activeTab, setActiveTab] = useState('treatment');
 
   const [form, setForm] = useState({
+    entryDate: '',
     bodyTemperature: '',
     systolicPressure: '',
     diastolicPressure: '',
     pulse: '',
     wellBeingLevel: '',
     painLevel: '',
+    symptomsText: '',
     complaintText: '',
     commentText: '',
   });
 
-  useEffect(() => {
-    restoreSession();
-  }, []);
+  const selectedCase = useMemo(
+    () => medicalCases.find((item) => item.id === selectedCaseId) || null,
+    [medicalCases, selectedCaseId]
+  );
 
-  const restoreSession = async () => {
-    try {
-      const userJson = await AsyncStorage.getItem(AUTH_USER_KEY);
-
-      if (userJson) {
-        const user = JSON.parse(userJson);
-        setAuthUser(user);
-        setIsAuthenticated(true);
-        await loadMedicalCases(user.patientId);
-      }
-    } catch (error) {
-      console.log('restoreSession error', error);
-    } finally {
-      setIsAuthLoading(false);
-    }
-  };
-
-  const handleLogin = async () => {
-    if (!login.trim() || !password.trim()) {
-      Alert.alert('Ошибка', 'Введите логин и пароль');
+  const handleLogin = () => {
+    if (login.trim() === MOCK_USER.login && password === MOCK_USER.password) {
+      setIsAuthenticated(true);
+      setScreen('cases');
       return;
     }
 
-    try {
-      setIsLoginLoading(true);
-
-      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          login: login.trim(),
-          password,
-        }),
-      });
-
-      if (!response.ok) {
-        let errorMessage = 'Не удалось выполнить вход';
-
-        try {
-          const errorData = await response.json();
-          if (errorData?.message) errorMessage = errorData.message;
-        } catch (parseError) {
-          console.log('login parse error', parseError);
-        }
-
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-      await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(data));
-
-      setAuthUser(data);
-      setIsAuthenticated(true);
-      setScreen('cases');
-      await loadMedicalCases(data.patientId);
-    } catch (error) {
-      Alert.alert('Ошибка входа', error.message || 'Не удалось выполнить вход');
-    } finally {
-      setIsLoginLoading(false);
-    }
+    Alert.alert('Ошибка входа', 'Неверный логин или пароль');
   };
 
-  const handleLogout = async () => {
-    try {
-      await AsyncStorage.removeItem(AUTH_USER_KEY);
-    } catch (error) {
-      console.log('logout error', error);
-    }
-
-    setAuthUser(null);
+  const handleLogout = () => {
     setIsAuthenticated(false);
-    setLogin('');
-    setPassword('');
-    setMedicalCases([]);
-    setSelectedCase(null);
-    setTreatments([]);
-    setSelectedTreatment(null);
-    setDiaryEntries([]);
+    setSelectedCaseId(null);
     setScreen('cases');
   };
 
-  const loadMedicalCases = async (patientId) => {
-    if (!patientId) {
-      Alert.alert('Ошибка', 'Не найден идентификатор пациента');
-      return;
-    }
-
-    try {
-      setIsCasesLoading(true);
-
-      const response = await fetch(
-        `${API_BASE_URL}/api/patient/medical-cases?patientId=${patientId}`
-      );
-
-      if (!response.ok) {
-        let errorMessage = 'Не удалось загрузить случаи обращения';
-
-        try {
-          const errorData = await response.json();
-          if (errorData?.message) errorMessage = errorData.message;
-        } catch (parseError) {
-          console.log('medical-cases parse error', parseError);
-        }
-
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-      setMedicalCases(Array.isArray(data) ? data : []);
-    } catch (error) {
-      Alert.alert(
-        'Ошибка',
-        error.message || 'Не удалось загрузить случаи обращения'
-      );
-    } finally {
-      setIsCasesLoading(false);
-    }
+  const openMedicalCase = (caseId) => {
+    setSelectedCaseId(caseId);
+    setActiveTab('treatment');
+    setScreen('caseDetails');
   };
 
-  const loadTreatments = async (caseItem) => {
-    if (!caseItem?.id) {
-      Alert.alert('Ошибка', 'Не найден идентификатор случая обращения');
-      return;
-    }
-
-    try {
-      setIsTreatmentsLoading(true);
-      setSelectedCase(caseItem);
-      setSelectedTreatment(null);
-      setTreatments([]);
-      setDiaryEntries([]);
-      setScreen('treatments');
-
-      const response = await fetch(
-        `${API_BASE_URL}/api/patient/medical-cases/${caseItem.id}/treatments`
-      );
-
-      if (!response.ok) {
-        let errorMessage = 'Не удалось загрузить лечение';
-
-        try {
-          const errorData = await response.json();
-          if (errorData?.message) errorMessage = errorData.message;
-        } catch (parseError) {
-          console.log('treatments parse error', parseError);
-        }
-
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-      setTreatments(Array.isArray(data) ? data : []);
-    } catch (error) {
-      Alert.alert('Ошибка', error.message || 'Не удалось загрузить лечение');
-      setTreatments([]);
-    } finally {
-      setIsTreatmentsLoading(false);
-    }
-  };
-
-  const loadDiaryEntries = async (treatment) => {
-    if (!selectedCase?.id || !treatment?.id || !authUser?.patientId) {
-      Alert.alert('Ошибка', 'Недостаточно данных для загрузки дневника');
-      return;
-    }
-
-    try {
-      setIsDiaryLoading(true);
-      setSelectedTreatment(treatment);
-      setDiaryEntries([]);
-      setScreen('diaryHistory');
-
-      const response = await fetch(
-        `${API_BASE_URL}/api/patient/medical-cases/${selectedCase.id}/treatments/${treatment.id}/diary?patientId=${authUser.patientId}`
-      );
-
-      if (!response.ok) {
-        let errorMessage = 'Не удалось загрузить записи дневника';
-
-        try {
-          const errorData = await response.json();
-          if (errorData?.message) errorMessage = errorData.message;
-        } catch (parseError) {
-          console.log('diary history parse error', parseError);
-        }
-
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-      setDiaryEntries(Array.isArray(data) ? data : []);
-    } catch (error) {
-      Alert.alert('Ошибка', error.message || 'Не удалось загрузить записи дневника');
-      setDiaryEntries([]);
-    } finally {
-      setIsDiaryLoading(false);
-    }
-  };
-
-  const openDiaryForm = (treatment) => {
-    setSelectedTreatment(treatment);
+  const openCreateDiary = () => {
     setForm({
+      entryDate: '',
       bodyTemperature: '',
       systolicPressure: '',
       diastolicPressure: '',
       pulse: '',
       wellBeingLevel: '',
       painLevel: '',
+      symptomsText: '',
       complaintText: '',
       commentText: '',
     });
-    setScreen('diaryForm');
+    setScreen('createDiary');
   };
 
-  const submitDiaryEntry = async () => {
-    if (!authUser?.patientId) {
-      Alert.alert('Ошибка', 'Не найден идентификатор пациента');
+  const saveDiaryEntry = () => {
+    if (!selectedCase) return;
+
+    if (!form.entryDate.trim()) {
+      Alert.alert('Ошибка', 'Укажите дату записи');
       return;
     }
 
-    if (!selectedCase?.id || !selectedTreatment?.id) {
-      Alert.alert('Ошибка', 'Не выбран случай обращения или лечение');
-      return;
-    }
+    const newEntry = {
+      id: Date.now(),
+      entryDate: form.entryDate,
+      bodyTemperature: form.bodyTemperature,
+      bloodPressure:
+        form.systolicPressure && form.diastolicPressure
+          ? `${form.systolicPressure}/${form.diastolicPressure}`
+          : '',
+      pulse: form.pulse,
+      wellBeingLevel: form.wellBeingLevel,
+      painLevel: form.painLevel,
+      symptomsText: form.symptomsText,
+      complaintText: form.complaintText,
+      commentText: form.commentText,
+    };
 
-    if (
-      !form.bodyTemperature ||
-      !form.systolicPressure ||
-      !form.diastolicPressure ||
-      !form.pulse ||
-      !form.wellBeingLevel ||
-      !form.painLevel
-    ) {
-      Alert.alert('Ошибка', 'Заполните обязательные поля');
-      return;
-    }
-
-    try {
-      setIsDiarySubmitting(true);
-
-      const response = await fetch(
-        `${API_BASE_URL}/api/patient/medical-cases/${selectedCase.id}/treatments/${selectedTreatment.id}/diary?patientId=${authUser.patientId}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            bodyTemperature: Number(form.bodyTemperature),
-            systolicPressure: Number(form.systolicPressure),
-            diastolicPressure: Number(form.diastolicPressure),
-            pulse: Number(form.pulse),
-            wellBeingLevel: Number(form.wellBeingLevel),
-            painLevel: Number(form.painLevel),
-            complaintText: form.complaintText,
-            commentText: form.commentText,
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        let errorMessage = 'Не удалось отправить запись дневника';
-
-        try {
-          const errorData = await response.json();
-          if (errorData?.message) errorMessage = errorData.message;
-        } catch (parseError) {
-          console.log('diary submit parse error', parseError);
-        }
-
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-
-      Alert.alert(
-        'Успешно',
-        data?.message || 'Запись дневника успешно отправлена врачу'
-      );
-
-      await loadDiaryEntries(selectedTreatment);
-    } catch (error) {
-      Alert.alert(
-        'Ошибка',
-        error.message || 'Не удалось отправить запись дневника'
-      );
-    } finally {
-      setIsDiarySubmitting(false);
-    }
-  };
-
-  const formatDate = (dateString) => {
-    if (!dateString) return '-';
-    if (typeof dateString !== 'string') return String(dateString);
-
-    const match = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (match) {
-      const [, year, month, day] = match;
-      return `${day}.${month}.${year}`;
-    }
-
-    return dateString;
-  };
-
-  if (isAuthLoading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.centeredBlock}>
-          <Text style={styles.title}>Дневник симптомов</Text>
-          <Text style={styles.subtitle}>Проверка сохранённого входа...</Text>
-        </View>
-      </SafeAreaView>
+    setMedicalCases((prev) =>
+      prev.map((item) =>
+        item.id === selectedCase.id
+          ? { ...item, diaryEntries: [newEntry, ...item.diaryEntries] }
+          : item
+      )
     );
-  }
+
+    Alert.alert('Успешно', 'Запись дневника отправлена врачу');
+    setScreen('caseDetails');
+    setActiveTab('diary');
+  };
 
   if (!isAuthenticated) {
     return (
       <SafeAreaView style={styles.container}>
-        <ScrollView contentContainerStyle={styles.loginScrollContent}>
-          <View style={styles.loginWrapper}>
-            <Text style={styles.title}>Дневник симптомов</Text>
-            <Text style={styles.subtitle}>Вход в аккаунт пациента</Text>
+        <View style={styles.loginWrapper}>
+          <Text style={styles.title}>Дневник симптомов</Text>
+          <Text style={styles.subtitle}>Вход в аккаунт пациента</Text>
 
-            <TextInput
-              style={styles.input}
-              placeholder="Логин"
-              autoCapitalize="none"
-              value={login}
-              onChangeText={setLogin}
-            />
+          <TextInput
+            style={styles.input}
+            placeholder="Логин"
+            value={login}
+            onChangeText={setLogin}
+          />
 
-            <TextInput
-              style={styles.input}
-              placeholder="Пароль"
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-            />
+          <TextInput
+            style={styles.input}
+            placeholder="Пароль"
+            secureTextEntry
+            value={password}
+            onChangeText={setPassword}
+          />
 
-            <TouchableOpacity
-              style={[styles.primaryButton, isLoginLoading && styles.buttonDisabled]}
-              onPress={handleLogin}
-              disabled={isLoginLoading}
-            >
-              <Text style={styles.primaryButtonText}>
-                {isLoginLoading ? 'Выполняется вход...' : 'Войти'}
-              </Text>
-            </TouchableOpacity>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleLogin}>
+            <Text style={styles.primaryButtonText}>Войти</Text>
+          </TouchableOpacity>
 
-            <View style={styles.infoBox}>
-              <Text style={styles.infoText}>Backend: {API_BASE_URL}</Text>
-            </View>
+          <View style={styles.demoBox}>
+            <Text style={styles.demoText}>Тестовый вход:</Text>
+            <Text style={styles.demoText}>Логин: patient1</Text>
+            <Text style={styles.demoText}>Пароль: 12345</Text>
           </View>
-        </ScrollView>
+        </View>
       </SafeAreaView>
     );
   }
@@ -408,298 +205,139 @@ export default function App() {
   if (screen === 'cases') {
     return (
       <SafeAreaView style={styles.container}>
-        <ScrollView contentContainerStyle={styles.pageContent}>
-          <View style={styles.topBlock}>
+        <View style={styles.header}>
+          <View>
             <Text style={styles.title}>Здравствуйте!</Text>
-            <Text style={styles.subtitle}>{authUser?.fullName || 'Пациент'}</Text>
+            <Text style={styles.subtitle}>{MOCK_USER.fullName}</Text>
           </View>
+          <TouchableOpacity style={styles.secondaryButton} onPress={handleLogout}>
+            <Text style={styles.secondaryButtonText}>Выйти</Text>
+          </TouchableOpacity>
+        </View>
 
-          <View style={styles.actionsColumn}>
+        <Text style={styles.sectionTitle}>Мои случаи обращения</Text>
+
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          {medicalCases.map((item) => (
             <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => loadMedicalCases(authUser?.patientId)}
-              disabled={isCasesLoading}
+              key={item.id}
+              style={styles.card}
+              onPress={() => openMedicalCase(item.id)}
             >
-              <Text style={styles.secondaryButtonText}>
-                {isCasesLoading ? 'Загрузка...' : 'Обновить случаи'}
-              </Text>
+              <Text style={styles.cardTitle}>{item.caseNumber}</Text>
+              <Text style={styles.cardText}>Диагноз: {item.diagnosis}</Text>
+              <Text style={styles.cardText}>Дата начала: {item.startDate}</Text>
+              <Text style={styles.cardText}>Статус: {item.status}</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity style={styles.secondaryButton} onPress={handleLogout}>
-              <Text style={styles.secondaryButtonText}>Выйти</Text>
-            </TouchableOpacity>
-          </View>
-
-          <Text style={styles.sectionTitle}>Мои случаи обращения</Text>
-
-          {isCasesLoading ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyStateText}>Загрузка случаев обращения...</Text>
-            </View>
-          ) : medicalCases.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyStateText}>Случаи обращения не найдены</Text>
-            </View>
-          ) : (
-            medicalCases.map((item) => (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.card}
-                onPress={() => loadTreatments(item)}
-              >
-                <Text style={styles.cardTitle}>{item.caseNumber}</Text>
-                <Text style={styles.cardText}>Диагноз: {item.diagnosis || '-'}</Text>
-                <Text style={styles.cardText}>
-                  Дата начала: {formatDate(item.startDate)}
-                </Text>
-                <Text style={styles.cardText}>
-                  Дата окончания: {formatDate(item.endDate)}
-                </Text>
-                <Text style={styles.cardText}>Статус: {item.status || '-'}</Text>
-              </TouchableOpacity>
-            ))
-          )}
+          ))}
         </ScrollView>
       </SafeAreaView>
     );
   }
 
-  if (screen === 'treatments') {
+  if (screen === 'caseDetails' && selectedCase) {
     return (
       <SafeAreaView style={styles.container}>
-        <ScrollView contentContainerStyle={styles.pageContent}>
-          <View style={styles.topBlock}>
-            <TouchableOpacity onPress={() => setScreen('cases')}>
-              <Text style={styles.backLink}>← Назад к случаям</Text>
-            </TouchableOpacity>
+        <View style={styles.headerColumn}>
+          <TouchableOpacity onPress={() => setScreen('cases')}>
+            <Text style={styles.backLink}>← Назад к случаям</Text>
+          </TouchableOpacity>
 
-            <Text style={styles.title}>
-              {selectedCase?.caseNumber || 'Случай обращения'}
-            </Text>
-            <Text style={styles.subtitle}>
-              Диагноз: {selectedCase?.diagnosis || '-'}
-            </Text>
-          </View>
+          <Text style={styles.title}>{selectedCase.caseNumber}</Text>
+          <Text style={styles.subtitle}>Диагноз: {selectedCase.diagnosis}</Text>
+        </View>
 
-          <View style={styles.actionsColumn}>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => loadTreatments(selectedCase)}
-              disabled={isTreatmentsLoading}
+        <View style={styles.tabsRow}>
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'treatment' && styles.tabButtonActive]}
+            onPress={() => setActiveTab('treatment')}
+          >
+            <Text
+              style={[styles.tabButtonText, activeTab === 'treatment' && styles.tabButtonTextActive]}
             >
-              <Text style={styles.secondaryButtonText}>
-                {isTreatmentsLoading ? 'Загрузка...' : 'Обновить лечение'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <Text style={styles.sectionTitle}>Лечение</Text>
-
-          {isTreatmentsLoading ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyStateText}>Загрузка лечения...</Text>
-            </View>
-          ) : treatments.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyStateText}>Лечение не найдено</Text>
-            </View>
-          ) : (
-            treatments.map((item) => (
-              <View key={item.id} style={styles.card}>
-                <Text style={styles.cardTitle}>
-                  {item.treatmentName || 'Без названия'}
-                </Text>
-                <Text style={styles.cardText}>Описание: {item.description || '-'}</Text>
-                <Text style={styles.cardText}>
-                  Дата начала: {formatDate(item.startDate)}
-                </Text>
-                <Text style={styles.cardText}>
-                  Дата окончания: {formatDate(item.endDate)}
-                </Text>
-                <Text style={styles.cardText}>
-                  Активность: {item.isActive ? 'Активно' : 'Неактивно'}
-                </Text>
-                <Text style={styles.cardText}>ID врача: {item.doctorId ?? '-'}</Text>
-
-                <TouchableOpacity
-                  style={styles.secondaryActionButton}
-                  onPress={() => loadDiaryEntries(item)}
-                >
-                  <Text style={styles.secondaryActionButtonText}>
-                    Просмотреть все записи
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.primaryButtonSmall}
-                  onPress={() => openDiaryForm(item)}
-                >
-                  <Text style={styles.primaryButtonText}>Заполнить дневник</Text>
-                </TouchableOpacity>
-              </View>
-            ))
-          )}
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  if (screen === 'diaryHistory') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <ScrollView contentContainerStyle={styles.pageContent}>
-          <View style={styles.topBlock}>
-            <TouchableOpacity onPress={() => setScreen('treatments')}>
-              <Text style={styles.backLink}>← Назад к лечению</Text>
-            </TouchableOpacity>
-
-            <Text style={styles.title}>Все записи дневника</Text>
-            <Text style={styles.subtitle}>
-              Лечение: {selectedTreatment?.treatmentName || '-'}
+              Treatment
             </Text>
-          </View>
-
-          <View style={styles.actionsColumn}>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => loadDiaryEntries(selectedTreatment)}
-              disabled={isDiaryLoading}
-            >
-              <Text style={styles.secondaryButtonText}>
-                {isDiaryLoading ? 'Загрузка...' : 'Обновить записи'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {isDiaryLoading ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyStateText}>Загрузка записей дневника...</Text>
-            </View>
-          ) : diaryEntries.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyStateText}>
-                Записи дневника по этому лечению отсутствуют
-              </Text>
-            </View>
-          ) : (
-            diaryEntries.map((entry) => (
-              <View key={entry.id} style={styles.card}>
-                <Text style={styles.cardTitle}>Запись №{entry.id}</Text>
-                <Text style={styles.cardText}>
-                  Температура: {entry.bodyTemperature ?? '-'}
-                </Text>
-                <Text style={styles.cardText}>
-                  Систолическое давление: {entry.systolicPressure ?? '-'}
-                </Text>
-                <Text style={styles.cardText}>
-                  Диастолическое давление: {entry.diastolicPressure ?? '-'}
-                </Text>
-                <Text style={styles.cardText}>Пульс: {entry.pulse ?? '-'}</Text>
-                <Text style={styles.cardText}>
-                  Самочувствие: {entry.wellBeingLevel ?? '-'}
-                </Text>
-                <Text style={styles.cardText}>Боль: {entry.painLevel ?? '-'}</Text>
-                <Text style={styles.cardText}>
-                  Жалобы: {entry.complaintText || '-'}
-                </Text>
-                <Text style={styles.cardText}>
-                  Комментарий: {entry.commentText || '-'}
-                </Text>
-              </View>
-            ))
-          )}
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  if (screen === 'diaryForm') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <ScrollView contentContainerStyle={styles.pageContent}>
-          <View style={styles.topBlock}>
-            <TouchableOpacity onPress={() => setScreen('treatments')}>
-              <Text style={styles.backLink}>← Назад к лечению</Text>
-            </TouchableOpacity>
-
-            <Text style={styles.title}>Запись дневника</Text>
-            <Text style={styles.subtitle}>
-              Лечение: {selectedTreatment?.treatmentName || '-'}
-            </Text>
-          </View>
-
-          <FormInput
-            label="Температура тела"
-            placeholder="37.5"
-            value={form.bodyTemperature}
-            onChangeText={(value) => setForm({ ...form, bodyTemperature: value })}
-            keyboardType="numeric"
-          />
-
-          <FormInput
-            label="Систолическое давление"
-            placeholder="120"
-            value={form.systolicPressure}
-            onChangeText={(value) => setForm({ ...form, systolicPressure: value })}
-            keyboardType="numeric"
-          />
-
-          <FormInput
-            label="Диастолическое давление"
-            placeholder="80"
-            value={form.diastolicPressure}
-            onChangeText={(value) => setForm({ ...form, diastolicPressure: value })}
-            keyboardType="numeric"
-          />
-
-          <FormInput
-            label="Пульс"
-            placeholder="82"
-            value={form.pulse}
-            onChangeText={(value) => setForm({ ...form, pulse: value })}
-            keyboardType="numeric"
-          />
-
-          <FormInput
-            label="Самочувствие (1-5)"
-            placeholder="3"
-            value={form.wellBeingLevel}
-            onChangeText={(value) => setForm({ ...form, wellBeingLevel: value })}
-            keyboardType="numeric"
-          />
-
-          <FormInput
-            label="Уровень боли (0-10)"
-            placeholder="2"
-            value={form.painLevel}
-            onChangeText={(value) => setForm({ ...form, painLevel: value })}
-            keyboardType="numeric"
-          />
-
-          <FormInput
-            label="Жалобы"
-            placeholder="Опишите жалобы"
-            value={form.complaintText}
-            onChangeText={(value) => setForm({ ...form, complaintText: value })}
-            multiline
-          />
-
-          <FormInput
-            label="Комментарий"
-            placeholder="Дополнительная информация"
-            value={form.commentText}
-            onChangeText={(value) => setForm({ ...form, commentText: value })}
-            multiline
-          />
+          </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.primaryButton, isDiarySubmitting && styles.buttonDisabled]}
-            onPress={submitDiaryEntry}
-            disabled={isDiarySubmitting}
+            style={[styles.tabButton, activeTab === 'diary' && styles.tabButtonActive]}
+            onPress={() => setActiveTab('diary')}
           >
-            <Text style={styles.primaryButtonText}>
-              {isDiarySubmitting ? 'Отправка...' : 'Отправить врачу'}
+            <Text
+              style={[styles.tabButtonText, activeTab === 'diary' && styles.tabButtonTextActive]}
+            >
+              Дневник симптомов
             </Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          {activeTab === 'treatment' ? (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>{selectedCase.treatment.name}</Text>
+              <Text style={styles.cardText}>Описание: {selectedCase.treatment.description}</Text>
+              <Text style={styles.cardText}>Дата начала: {selectedCase.treatment.startDate}</Text>
+              <Text style={styles.cardText}>Дата окончания: {selectedCase.treatment.endDate}</Text>
+              <Text style={styles.cardText}>
+                Активность: {selectedCase.treatment.isActive ? 'Активно' : 'Неактивно'}
+              </Text>
+            </View>
+          ) : (
+            <View>
+              <TouchableOpacity style={styles.primaryButton} onPress={openCreateDiary}>
+                <Text style={styles.primaryButtonText}>Добавить запись</Text>
+              </TouchableOpacity>
+
+              {selectedCase.diaryEntries.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyStateText}>Записи дневника пока отсутствуют</Text>
+                </View>
+              ) : (
+                selectedCase.diaryEntries.map((entry) => (
+                  <View key={entry.id} style={styles.card}>
+                    <Text style={styles.cardTitle}>Дата: {entry.entryDate}</Text>
+                    <Text style={styles.cardText}>Температура: {entry.bodyTemperature || '-'}</Text>
+                    <Text style={styles.cardText}>Давление: {entry.bloodPressure || '-'}</Text>
+                    <Text style={styles.cardText}>Пульс: {entry.pulse || '-'}</Text>
+                    <Text style={styles.cardText}>Самочувствие: {entry.wellBeingLevel || '-'}</Text>
+                    <Text style={styles.cardText}>Боль: {entry.painLevel || '-'}</Text>
+                    <Text style={styles.cardText}>Симптомы: {entry.symptomsText || '-'}</Text>
+                    <Text style={styles.cardText}>Жалобы: {entry.complaintText || '-'}</Text>
+                    <Text style={styles.cardText}>Комментарий: {entry.commentText || '-'}</Text>
+                  </View>
+                ))
+              )}
+            </View>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  if (screen === 'createDiary') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          <TouchableOpacity onPress={() => setScreen('caseDetails')}>
+            <Text style={styles.backLink}>← Назад к случаю</Text>
+          </TouchableOpacity>
+
+          <Text style={styles.title}>Новая запись дневника</Text>
+          <Text style={styles.subtitle}>Заполните поля и отправьте запись врачу</Text>
+
+          <FormInput label="Дата" placeholder="13.04.2026" value={form.entryDate} onChangeText={(value) => setForm({ ...form, entryDate: value })} />
+          <FormInput label="Температура" placeholder="37.5" value={form.bodyTemperature} onChangeText={(value) => setForm({ ...form, bodyTemperature: value })} keyboardType="numeric" />
+          <FormInput label="Систолическое давление" placeholder="120" value={form.systolicPressure} onChangeText={(value) => setForm({ ...form, systolicPressure: value })} keyboardType="numeric" />
+          <FormInput label="Диастолическое давление" placeholder="80" value={form.diastolicPressure} onChangeText={(value) => setForm({ ...form, diastolicPressure: value })} keyboardType="numeric" />
+          <FormInput label="Пульс" placeholder="82" value={form.pulse} onChangeText={(value) => setForm({ ...form, pulse: value })} keyboardType="numeric" />
+          <FormInput label="Самочувствие (1-5)" placeholder="3" value={form.wellBeingLevel} onChangeText={(value) => setForm({ ...form, wellBeingLevel: value })} keyboardType="numeric" />
+          <FormInput label="Уровень боли (0-10)" placeholder="2" value={form.painLevel} onChangeText={(value) => setForm({ ...form, painLevel: value })} keyboardType="numeric" />
+          <FormInput label="Симптомы" placeholder="Головная боль, слабость" value={form.symptomsText} onChangeText={(value) => setForm({ ...form, symptomsText: value })} multiline />
+          <FormInput label="Жалобы" placeholder="Опишите жалобы" value={form.complaintText} onChangeText={(value) => setForm({ ...form, complaintText: value })} multiline />
+          <FormInput label="Комментарий" placeholder="Дополнительная информация" value={form.commentText} onChangeText={(value) => setForm({ ...form, commentText: value })} multiline />
+
+          <TouchableOpacity style={styles.primaryButton} onPress={saveDiaryEntry}>
+            <Text style={styles.primaryButtonText}>Отправить врачу</Text>
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
@@ -728,31 +366,23 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f7fb',
   },
-  centeredBlock: {
+  loginWrapper: {
     flex: 1,
     justifyContent: 'center',
+    padding: 20,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
   },
-  loginScrollContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    paddingVertical: 48,
-  },
-  loginWrapper: {
+  headerColumn: {
     paddingHorizontal: 20,
-    paddingBottom: 48,
-  },
-  pageContent: {
-    paddingHorizontal: 20,
-    paddingTop: 56,
-    paddingBottom: 72,
-  },
-  topBlock: {
-    marginBottom: 26,
-  },
-  actionsColumn: {
-    marginBottom: 24,
-    gap: 12,
+    paddingTop: 16,
+    paddingBottom: 8,
   },
   title: {
     fontSize: 24,
@@ -762,14 +392,19 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 15,
     color: '#6b7280',
-    marginTop: 6,
-    lineHeight: 21,
+    marginTop: 4,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#1f2937',
-    marginBottom: 16,
+    paddingHorizontal: 20,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  scrollContent: {
+    padding: 20,
+    paddingTop: 12,
   },
   card: {
     backgroundColor: '#ffffff',
@@ -791,7 +426,7 @@ const styles = StyleSheet.create({
   cardText: {
     fontSize: 14,
     color: '#374151',
-    marginBottom: 6,
+    marginBottom: 5,
     lineHeight: 20,
   },
   inputWrapper: {
@@ -809,10 +444,9 @@ const styles = StyleSheet.create({
     borderColor: '#d1d5db',
     borderRadius: 12,
     paddingHorizontal: 14,
-    paddingVertical: 13,
+    paddingVertical: 12,
     fontSize: 15,
     color: '#111827',
-    marginTop: 4,
   },
   multilineInput: {
     minHeight: 96,
@@ -821,17 +455,10 @@ const styles = StyleSheet.create({
   primaryButton: {
     backgroundColor: '#2563eb',
     borderRadius: 12,
-    paddingVertical: 15,
+    paddingVertical: 14,
     alignItems: 'center',
-    marginTop: 24,
+    marginTop: 8,
     marginBottom: 12,
-  },
-  primaryButtonSmall: {
-    backgroundColor: '#2563eb',
-    borderRadius: 12,
-    paddingVertical: 13,
-    alignItems: 'center',
-    marginTop: 14,
   },
   primaryButtonText: {
     color: '#ffffff',
@@ -841,36 +468,43 @@ const styles = StyleSheet.create({
   secondaryButton: {
     backgroundColor: '#ffffff',
     borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
     borderWidth: 1,
     borderColor: '#d1d5db',
-    alignItems: 'center',
   },
   secondaryButtonText: {
     color: '#374151',
     fontWeight: '600',
-    fontSize: 15,
   },
-  secondaryActionButton: {
-    backgroundColor: '#ffffff',
+  tabsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 6,
+  },
+  tabButton: {
+    flex: 1,
+    backgroundColor: '#e5e7eb',
+    paddingVertical: 12,
     borderRadius: 12,
-    paddingVertical: 13,
-    paddingHorizontal: 16,
     alignItems: 'center',
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: '#cbd5e1',
   },
-  secondaryActionButtonText: {
-    color: '#1d4ed8',
+  tabButtonActive: {
+    backgroundColor: '#2563eb',
+  },
+  tabButtonText: {
+    color: '#374151',
     fontWeight: '600',
-    fontSize: 15,
+  },
+  tabButtonTextActive: {
+    color: '#ffffff',
   },
   backLink: {
     fontSize: 15,
     color: '#2563eb',
-    marginBottom: 14,
+    marginBottom: 12,
     fontWeight: '600',
   },
   emptyState: {
@@ -878,24 +512,21 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 20,
     alignItems: 'center',
+    marginTop: 8,
   },
   emptyStateText: {
     color: '#6b7280',
     fontSize: 15,
-    textAlign: 'center',
   },
-  infoBox: {
-    marginTop: 20,
+  demoBox: {
+    marginTop: 16,
     backgroundColor: '#e0ecff',
     borderRadius: 12,
     padding: 14,
   },
-  infoText: {
+  demoText: {
     color: '#1e3a8a',
     fontSize: 14,
-    lineHeight: 20,
-  },
-  buttonDisabled: {
-    opacity: 0.7,
+    marginBottom: 4,
   },
 });
